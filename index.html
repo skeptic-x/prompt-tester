@@ -17,8 +17,7 @@
     .container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px; max-width: 1600px; margin: 0 auto; }
     
     .panel { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
-    .panel-header { padding: 12px 16px; border-bottom: 1px solid #eee; font-weight: 600; color: #333; display: flex; justify-content: space-between; align-items: center; }
-    .panel-header span { font-size: 12px; color: #888; font-weight: normal; }
+    .panel-header { padding: 12px 16px; border-bottom: 1px solid #eee; font-weight: 600; color: #333; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
     
     .system-prompt { padding: 12px; border-bottom: 1px solid #eee; }
     .system-prompt label { font-size: 12px; color: #666; display: block; margin-bottom: 6px; }
@@ -45,6 +44,8 @@
     .input-area button.send-b:hover { background: #6d28d9; }
     
     .model-select { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; background: #fff; margin: 0 8px; }
+    
+    .panel-header span { font-size: 11px; color: #059669; font-weight: 500; background: #ecfdf5; padding: 3px 8px; border-radius: 4px; }
 
     .full-width { grid-column: 1 / -1; }
     
@@ -64,10 +65,10 @@
       <div class="panel-header">
         Prompt A 
         <select id="modelA" class="model-select">
-          <option value="gpt-4o-mini">gpt-4o-mini</option>
-          <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-          <option value="gpt-4.1-nano">gpt-4.1-nano</option>
-          <option value="gpt-5-nano">gpt-5-nano</option>
+          <option value="gpt-5-nano">gpt-5-nano ($0.05/$0.40)</option>
+          <option value="gpt-4.1-nano">gpt-4.1-nano ($0.10/$0.40)</option>
+          <option value="gpt-4o-mini">gpt-4o-mini ($0.15/$0.60)</option>
+          <option value="gpt-4.1-mini">gpt-4.1-mini ($0.40/$1.60)</option>
         </select>
         <span id="tokensA"></span>
       </div>
@@ -82,10 +83,10 @@
       <div class="panel-header">
         Prompt B 
         <select id="modelB" class="model-select">
-          <option value="gpt-4o-mini">gpt-4o-mini</option>
-          <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-          <option value="gpt-4.1-nano">gpt-4.1-nano</option>
-          <option value="gpt-5-nano">gpt-5-nano</option>
+          <option value="gpt-5-nano">gpt-5-nano ($0.05/$0.40)</option>
+          <option value="gpt-4.1-nano">gpt-4.1-nano ($0.10/$0.40)</option>
+          <option value="gpt-4o-mini">gpt-4o-mini ($0.15/$0.60)</option>
+          <option value="gpt-4.1-mini">gpt-4.1-mini ($0.40/$1.60)</option>
         </select>
         <span id="tokensB"></span>
       </div>
@@ -114,12 +115,37 @@
     let lastUserMessage = '';
     let lastTarget = 'both';
 
+    // Pricing per 1M tokens (Standard tier)
+    const PRICING = {
+      'gpt-5-nano':   { input: 0.05,  output: 0.40 },
+      'gpt-4.1-nano': { input: 0.10,  output: 0.40 },
+      'gpt-4o-mini':  { input: 0.15,  output: 0.60 },
+      'gpt-4.1-mini': { input: 0.40,  output: 1.60 }
+    };
+
+    // Running totals
+    let totalCostA = 0;
+    let totalCostB = 0;
+
+    function calculateCost(model, promptTokens, completionTokens) {
+      const prices = PRICING[model] || { input: 0, output: 0 };
+      const inputCost = (promptTokens / 1_000_000) * prices.input;
+      const outputCost = (completionTokens / 1_000_000) * prices.output;
+      return inputCost + outputCost;
+    }
+
+    function formatCost(cost) {
+      if (cost < 0.0001) return '<$0.0001';
+      if (cost < 0.01) return '$' + cost.toFixed(4);
+      return '$' + cost.toFixed(3);
+    }
+
     // Load saved API key and prompts
     document.getElementById('apiKey').value = localStorage.getItem('openai_key') || '';
     document.getElementById('systemA').value = localStorage.getItem('systemA') || 'You are a helpful assistant.';
     document.getElementById('systemB').value = localStorage.getItem('systemB') || 'You are a helpful assistant.';
-    document.getElementById('modelA').value = localStorage.getItem('modelA') || 'gpt-4o-mini';
-    document.getElementById('modelB').value = localStorage.getItem('modelB') || 'gpt-4o-mini';
+    document.getElementById('modelA').value = localStorage.getItem('modelA') || 'gpt-5-nano';
+    document.getElementById('modelB').value = localStorage.getItem('modelB') || 'gpt-5-nano';
     updateStatus();
 
     // Save on change
@@ -189,7 +215,9 @@
       if (data.error) throw new Error(data.error.message);
       return {
         content: data.choices[0].message.content,
-        tokens: data.usage?.total_tokens
+        promptTokens: data.usage?.prompt_tokens || 0,
+        completionTokens: data.usage?.completion_tokens || 0,
+        totalTokens: data.usage?.total_tokens || 0
       };
     }
 
@@ -242,7 +270,9 @@
         if (resultA.status === 'fulfilled') {
           addMessage('chatA', 'assistant', resultA.value.content);
           historyA.push({ role: 'assistant', content: resultA.value.content });
-          document.getElementById('tokensA').textContent = `${resultA.value.tokens} tok`;
+          const cost = calculateCost(modelA, resultA.value.promptTokens, resultA.value.completionTokens);
+          totalCostA += cost;
+          document.getElementById('tokensA').textContent = `${resultA.value.totalTokens} tok · ${formatCost(cost)} (${formatCost(totalCostA)} total)`;
         } else {
           addMessage('chatA', 'error', resultA.reason.message);
         }
@@ -255,7 +285,9 @@
         if (resultB.status === 'fulfilled') {
           addMessage('chatB', 'assistant', resultB.value.content);
           historyB.push({ role: 'assistant', content: resultB.value.content });
-          document.getElementById('tokensB').textContent = `${resultB.value.tokens} tok`;
+          const cost = calculateCost(modelB, resultB.value.promptTokens, resultB.value.completionTokens);
+          totalCostB += cost;
+          document.getElementById('tokensB').textContent = `${resultB.value.totalTokens} tok · ${formatCost(cost)} (${formatCost(totalCostB)} total)`;
         } else {
           addMessage('chatB', 'error', resultB.reason.message);
         }
@@ -271,6 +303,8 @@
       document.getElementById('tokensB').textContent = '';
       historyA.length = 0;
       historyB.length = 0;
+      totalCostA = 0;
+      totalCostB = 0;
     }
 
     function retryLast() {

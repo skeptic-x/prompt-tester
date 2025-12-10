@@ -38,10 +38,11 @@
     .input-area button:disabled { background: #ccc; cursor: not-allowed; }
     .input-area button.secondary { background: #6b7280; }
     .input-area button.secondary:hover { background: #4b5563; }
-    .input-area button.send-a { background: #059669; }
-    .input-area button.send-a:hover { background: #047857; }
-    .input-area button.send-b { background: #7c3aed; }
-    .input-area button.send-b:hover { background: #6d28d9; }
+    
+    .checkbox-a, .checkbox-b { display: flex; align-items: center; gap: 4px; padding: 8px 12px; border-radius: 6px; font-weight: 600; cursor: pointer; user-select: none; }
+    .checkbox-a { background: #dcfce7; color: #166534; }
+    .checkbox-b { background: #ede9fe; color: #5b21b6; }
+    .checkbox-a input, .checkbox-b input { cursor: pointer; }
     
     .model-select { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; background: #fff; margin: 0 8px; }
     
@@ -107,10 +108,10 @@
 
     <div class="input-area full-width">
       <div class="input-row">
-        <textarea id="userInput" placeholder="Type your message... (Enter to send to both, Shift+Enter for newline)"></textarea>
-        <button id="sendBothBtn" onclick="sendMessage('both')">Both</button>
-        <button class="send-a" onclick="sendMessage('a')">→ A</button>
-        <button class="send-b" onclick="sendMessage('b')">→ B</button>
+        <textarea id="userInput" placeholder="Type your message... (Enter to send, Shift+Enter for newline)"></textarea>
+        <label class="checkbox-a"><input type="checkbox" id="targetA" checked> A</label>
+        <label class="checkbox-b"><input type="checkbox" id="targetB" checked> B</label>
+        <button onclick="sendMessage()">Send</button>
         <button class="secondary" onclick="clearChats()">Clear</button>
         <button class="secondary" onclick="retryLast()">Retry</button>
       </div>
@@ -121,7 +122,7 @@
     const historyA = [];
     const historyB = [];
     let lastUserMessage = '';
-    let lastTarget = 'both';
+    let lastTarget = { a: true, b: true };
 
     // Pricing per 1M tokens (Standard tier)
     const PRICING = {
@@ -186,9 +187,16 @@
     document.getElementById('userInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        sendMessage('both');
+        sendMessage();
       }
     });
+
+    function getTargets() {
+      return {
+        a: document.getElementById('targetA').checked,
+        b: document.getElementById('targetB').checked
+      };
+    }
 
     function updateStatus() {
       const status = document.getElementById('status');
@@ -283,13 +291,16 @@
       };
     }
 
-    async function sendMessage(target = 'both') {
+    async function sendMessage() {
       const input = document.getElementById('userInput');
       const message = input.value.trim();
       if (!message) return;
 
+      const targets = getTargets();
+      if (!targets.a && !targets.b) return; // Nothing selected
+
       lastUserMessage = message;
-      lastTarget = target;
+      lastTarget = targets;
       input.value = '';
 
       const modelA = document.getElementById('modelA').value;
@@ -297,8 +308,8 @@
       const systemA = document.getElementById('systemA').value;
       const systemB = document.getElementById('systemB').value;
 
-      const sendToA = target === 'both' || target === 'a';
-      const sendToB = target === 'both' || target === 'b';
+      const sendToA = targets.a;
+      const sendToB = targets.b;
 
       // Get message index for edit tracking
       const msgIndexA = historyA.filter(m => m.role === 'user').length;
@@ -369,23 +380,31 @@
     }
 
     function clearChats() {
-      document.getElementById('chatA').innerHTML = '';
-      document.getElementById('chatB').innerHTML = '';
-      document.getElementById('tokensA').textContent = '';
-      document.getElementById('tokensB').textContent = '';
-      document.getElementById('msgCountA').textContent = '';
-      document.getElementById('msgCountB').textContent = '';
-      historyA.length = 0;
-      historyB.length = 0;
-      totalCostA = 0; totalCostB = 0;
-      totalInputA = 0; totalOutputA = 0;
-      totalInputB = 0; totalOutputB = 0;
+      const targets = getTargets();
+      
+      if (targets.a) {
+        document.getElementById('chatA').innerHTML = '';
+        document.getElementById('tokensA').textContent = '';
+        document.getElementById('msgCountA').textContent = '';
+        historyA.length = 0;
+        totalCostA = 0;
+        totalInputA = 0; totalOutputA = 0;
+      }
+      
+      if (targets.b) {
+        document.getElementById('chatB').innerHTML = '';
+        document.getElementById('tokensB').textContent = '';
+        document.getElementById('msgCountB').textContent = '';
+        historyB.length = 0;
+        totalCostB = 0;
+        totalInputB = 0; totalOutputB = 0;
+      }
     }
 
     function retryLast() {
-      if (!lastUserMessage) return;
-      const sendToA = lastTarget === 'both' || lastTarget === 'a';
-      const sendToB = lastTarget === 'both' || lastTarget === 'b';
+      if (!lastUserMessage || !lastTarget) return;
+      const sendToA = lastTarget.a;
+      const sendToB = lastTarget.b;
       
       // Remove last exchange from A
       if (sendToA && historyA.length >= 2) {
@@ -401,7 +420,12 @@
       }
       updateMsgCount();
       document.getElementById('userInput').value = lastUserMessage;
-      sendMessage(lastTarget);
+      
+      // Restore checkbox state to match last send
+      document.getElementById('targetA').checked = sendToA;
+      document.getElementById('targetB').checked = sendToB;
+      
+      sendMessage();
     }
   </script>
 </body>

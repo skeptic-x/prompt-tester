@@ -282,7 +282,7 @@
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
-        body: JSON.stringify({ model, messages, max_tokens: parseInt(maxTokens), stream: true })
+        body: JSON.stringify({ model, messages, max_completion_tokens: parseInt(maxTokens), stream: true })
       });
 
       if (!response.ok) {

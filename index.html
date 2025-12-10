@@ -39,6 +39,12 @@
     .input-area button:disabled { background: #ccc; cursor: not-allowed; }
     .input-area button.secondary { background: #6b7280; }
     .input-area button.secondary:hover { background: #4b5563; }
+    .input-area button.send-a { background: #059669; }
+    .input-area button.send-a:hover { background: #047857; }
+    .input-area button.send-b { background: #7c3aed; }
+    .input-area button.send-b:hover { background: #6d28d9; }
+    
+    .model-select { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; background: #fff; margin: 0 8px; }
 
     .full-width { grid-column: 1 / -1; }
     
@@ -50,18 +56,21 @@
 <body>
   <div class="header">
     <input type="password" id="apiKey" placeholder="Paste OpenAI API Key (stored locally in browser)">
-    <select id="model">
-      <option value="gpt-4o-mini">gpt-4o-mini</option>
-      <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-      <option value="o3-mini">o3-mini</option>
-      <option value="o1-mini">o1-mini</option>
-    </select>
     <span class="status" id="status">⚪ Enter API key</span>
   </div>
 
   <div class="container">
     <div class="panel">
-      <div class="panel-header">Prompt A <span id="tokensA"></span></div>
+      <div class="panel-header">
+        Prompt A 
+        <select id="modelA" class="model-select">
+          <option value="gpt-4o-mini">gpt-4o-mini</option>
+          <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+          <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+          <option value="gpt-5-nano">gpt-5-nano</option>
+        </select>
+        <span id="tokensA"></span>
+      </div>
       <div class="system-prompt">
         <label>System Prompt</label>
         <textarea id="systemA" placeholder="You are a helpful assistant..."></textarea>
@@ -70,7 +79,16 @@
     </div>
 
     <div class="panel">
-      <div class="panel-header">Prompt B <span id="tokensB"></span></div>
+      <div class="panel-header">
+        Prompt B 
+        <select id="modelB" class="model-select">
+          <option value="gpt-4o-mini">gpt-4o-mini</option>
+          <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+          <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+          <option value="gpt-5-nano">gpt-5-nano</option>
+        </select>
+        <span id="tokensB"></span>
+      </div>
       <div class="system-prompt">
         <label>System Prompt</label>
         <textarea id="systemB" placeholder="You are a helpful assistant..."></textarea>
@@ -80,8 +98,10 @@
 
     <div class="input-area full-width">
       <div class="input-row">
-        <textarea id="userInput" placeholder="Type your message... (Enter to send, Shift+Enter for newline)"></textarea>
-        <button id="sendBtn" onclick="sendMessage()">Send to Both</button>
+        <textarea id="userInput" placeholder="Type your message... (Enter to send to both, Shift+Enter for newline)"></textarea>
+        <button id="sendBothBtn" onclick="sendMessage('both')">Both</button>
+        <button class="send-a" onclick="sendMessage('a')">→ A</button>
+        <button class="send-b" onclick="sendMessage('b')">→ B</button>
         <button class="secondary" onclick="clearChats()">Clear</button>
         <button class="secondary" onclick="retryLast()">Retry</button>
       </div>
@@ -92,11 +112,14 @@
     const historyA = [];
     const historyB = [];
     let lastUserMessage = '';
+    let lastTarget = 'both';
 
-    // Load saved API key
+    // Load saved API key and prompts
     document.getElementById('apiKey').value = localStorage.getItem('openai_key') || '';
     document.getElementById('systemA').value = localStorage.getItem('systemA') || 'You are a helpful assistant.';
     document.getElementById('systemB').value = localStorage.getItem('systemB') || 'You are a helpful assistant.';
+    document.getElementById('modelA').value = localStorage.getItem('modelA') || 'gpt-4o-mini';
+    document.getElementById('modelB').value = localStorage.getItem('modelB') || 'gpt-4o-mini';
     updateStatus();
 
     // Save on change
@@ -110,12 +133,18 @@
     document.getElementById('systemB').addEventListener('input', (e) => {
       localStorage.setItem('systemB', e.target.value);
     });
+    document.getElementById('modelA').addEventListener('change', (e) => {
+      localStorage.setItem('modelA', e.target.value);
+    });
+    document.getElementById('modelB').addEventListener('change', (e) => {
+      localStorage.setItem('modelB', e.target.value);
+    });
 
     // Enter to send
     document.getElementById('userInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        sendMessage();
+        sendMessage('both');
       }
     });
 
@@ -164,57 +193,75 @@
       };
     }
 
-    async function sendMessage() {
+    async function sendMessage(target = 'both') {
       const input = document.getElementById('userInput');
       const message = input.value.trim();
       if (!message) return;
 
       lastUserMessage = message;
+      lastTarget = target;
       input.value = '';
 
-      const model = document.getElementById('model').value;
+      const modelA = document.getElementById('modelA').value;
+      const modelB = document.getElementById('modelB').value;
       const systemA = document.getElementById('systemA').value;
       const systemB = document.getElementById('systemB').value;
 
-      // Add user message to both
-      addMessage('chatA', 'user', message);
-      addMessage('chatB', 'user', message);
-      historyA.push({ role: 'user', content: message });
-      historyB.push({ role: 'user', content: message });
+      const sendToA = target === 'both' || target === 'a';
+      const sendToB = target === 'both' || target === 'b';
+
+      // Add user message
+      if (sendToA) {
+        addMessage('chatA', 'user', message);
+        historyA.push({ role: 'user', content: message });
+      }
+      if (sendToB) {
+        addMessage('chatB', 'user', message);
+        historyB.push({ role: 'user', content: message });
+      }
 
       // Loading indicators
-      const loadingA = addMessage('chatA', 'loading', 'Thinking...');
-      const loadingB = addMessage('chatB', 'loading', 'Thinking...');
+      const loadingA = sendToA ? addMessage('chatA', 'loading', 'Thinking...') : null;
+      const loadingB = sendToB ? addMessage('chatB', 'loading', 'Thinking...') : null;
 
-      document.getElementById('sendBtn').disabled = true;
+      document.querySelectorAll('.input-area button').forEach(b => b.disabled = true);
 
-      // Call both in parallel
-      const [resultA, resultB] = await Promise.allSettled([
-        callOpenAI(systemA, historyA, model),
-        callOpenAI(systemB, historyB, model)
-      ]);
+      // Build promises
+      const promises = [];
+      if (sendToA) promises.push(callOpenAI(systemA, historyA, modelA));
+      if (sendToB) promises.push(callOpenAI(systemB, historyB, modelB));
+
+      const results = await Promise.allSettled(promises);
+
+      let idx = 0;
 
       // Handle A
-      loadingA.remove();
-      if (resultA.status === 'fulfilled') {
-        addMessage('chatA', 'assistant', resultA.value.content);
-        historyA.push({ role: 'assistant', content: resultA.value.content });
-        document.getElementById('tokensA').textContent = `${resultA.value.tokens} tokens`;
-      } else {
-        addMessage('chatA', 'error', resultA.reason.message);
+      if (sendToA) {
+        loadingA.remove();
+        const resultA = results[idx++];
+        if (resultA.status === 'fulfilled') {
+          addMessage('chatA', 'assistant', resultA.value.content);
+          historyA.push({ role: 'assistant', content: resultA.value.content });
+          document.getElementById('tokensA').textContent = `${resultA.value.tokens} tok`;
+        } else {
+          addMessage('chatA', 'error', resultA.reason.message);
+        }
       }
 
       // Handle B
-      loadingB.remove();
-      if (resultB.status === 'fulfilled') {
-        addMessage('chatB', 'assistant', resultB.value.content);
-        historyB.push({ role: 'assistant', content: resultB.value.content });
-        document.getElementById('tokensB').textContent = `${resultB.value.tokens} tokens`;
-      } else {
-        addMessage('chatB', 'error', resultB.reason.message);
+      if (sendToB) {
+        loadingB.remove();
+        const resultB = results[idx++];
+        if (resultB.status === 'fulfilled') {
+          addMessage('chatB', 'assistant', resultB.value.content);
+          historyB.push({ role: 'assistant', content: resultB.value.content });
+          document.getElementById('tokensB').textContent = `${resultB.value.tokens} tok`;
+        } else {
+          addMessage('chatB', 'error', resultB.reason.message);
+        }
       }
 
-      document.getElementById('sendBtn').disabled = false;
+      document.querySelectorAll('.input-area button').forEach(b => b.disabled = false);
     }
 
     function clearChats() {
@@ -228,19 +275,23 @@
 
     function retryLast() {
       if (!lastUserMessage) return;
-      // Remove last exchange
-      if (historyA.length >= 2) {
+      const sendToA = lastTarget === 'both' || lastTarget === 'a';
+      const sendToB = lastTarget === 'both' || lastTarget === 'b';
+      
+      // Remove last exchange from A
+      if (sendToA && historyA.length >= 2) {
         historyA.pop(); historyA.pop();
         const chatA = document.getElementById('chatA');
         chatA.lastChild?.remove(); chatA.lastChild?.remove();
       }
-      if (historyB.length >= 2) {
+      // Remove last exchange from B
+      if (sendToB && historyB.length >= 2) {
         historyB.pop(); historyB.pop();
         const chatB = document.getElementById('chatB');
         chatB.lastChild?.remove(); chatB.lastChild?.remove();
       }
       document.getElementById('userInput').value = lastUserMessage;
-      sendMessage();
+      sendMessage(lastTarget);
     }
   </script>
 </body>

@@ -46,6 +46,12 @@
     .model-select { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; background: #fff; margin: 0 8px; }
     
     .panel-header span { font-size: 11px; color: #059669; font-weight: 500; background: #ecfdf5; padding: 3px 8px; border-radius: 4px; }
+    .panel-header .msg-count { background: #e0e7ff; color: #4338ca; }
+
+    .message { position: relative; }
+    .message.user .edit-btn { display: none; position: absolute; right: 8px; top: 8px; background: transparent; border: none; cursor: pointer; font-size: 12px; color: #666; padding: 2px 6px; border-radius: 4px; }
+    .message.user .edit-btn:hover { background: #ddd; }
+    .message.user:hover .edit-btn { display: block; }
 
     .full-width { grid-column: 1 / -1; }
     
@@ -70,6 +76,7 @@
           <option value="gpt-4o-mini">gpt-4o-mini ($0.15/$0.60)</option>
           <option value="gpt-4.1-mini">gpt-4.1-mini ($0.40/$1.60)</option>
         </select>
+        <span id="msgCountA" class="msg-count"></span>
         <span id="tokensA"></span>
       </div>
       <div class="system-prompt">
@@ -88,6 +95,7 @@
           <option value="gpt-4o-mini">gpt-4o-mini ($0.15/$0.60)</option>
           <option value="gpt-4.1-mini">gpt-4.1-mini ($0.40/$1.60)</option>
         </select>
+        <span id="msgCountB" class="msg-count"></span>
         <span id="tokensB"></span>
       </div>
       <div class="system-prompt">
@@ -124,8 +132,9 @@
     };
 
     // Running totals
-    let totalCostA = 0;
-    let totalCostB = 0;
+    let totalCostA = 0, totalCostB = 0;
+    let totalInputA = 0, totalOutputA = 0;
+    let totalInputB = 0, totalOutputB = 0;
 
     function calculateCost(model, promptTokens, completionTokens) {
       const prices = PRICING[model] || { input: 0, output: 0 };
@@ -138,6 +147,13 @@
       if (cost < 0.0001) return '<$0.0001';
       if (cost < 0.01) return '$' + cost.toFixed(4);
       return '$' + cost.toFixed(3);
+    }
+
+    function updateMsgCount() {
+      const countA = historyA.filter(m => m.role === 'user').length;
+      const countB = historyB.filter(m => m.role === 'user').length;
+      document.getElementById('msgCountA').textContent = countA ? `${countA} msg` : '';
+      document.getElementById('msgCountB').textContent = countB ? `${countB} msg` : '';
     }
 
     // Load saved API key and prompts
@@ -185,14 +201,60 @@
       }
     }
 
-    function addMessage(chatId, role, content) {
+    function addMessage(chatId, role, content, msgIndex = null) {
       const chat = document.getElementById(chatId);
       const div = document.createElement('div');
       div.className = `message ${role}`;
       div.textContent = content;
+      
+      // Add edit button to user messages
+      if (role === 'user') {
+        const editBtn = document.createElement('button');
+        editBtn.className = 'edit-btn';
+        editBtn.textContent = '✏️';
+        editBtn.onclick = () => editMessage(chatId, msgIndex, content);
+        div.appendChild(editBtn);
+        div.dataset.msgIndex = msgIndex;
+      }
+      
       chat.appendChild(div);
       chat.scrollTop = chat.scrollHeight;
       return div;
+    }
+
+    function editMessage(chatId, msgIndex, content) {
+      const panel = chatId === 'chatA' ? 'a' : 'b';
+      const history = chatId === 'chatA' ? historyA : historyB;
+      const chat = document.getElementById(chatId);
+      
+      // Remove all messages from this index onwards
+      const toRemove = [];
+      chat.querySelectorAll('.message').forEach(el => {
+        const idx = parseInt(el.dataset.msgIndex);
+        if (!isNaN(idx) && idx >= msgIndex) toRemove.push(el);
+        // Also remove assistant messages that came after
+        if (el.previousElementSibling?.dataset.msgIndex >= msgIndex && !el.dataset.msgIndex) {
+          toRemove.push(el);
+        }
+      });
+      
+      // Simpler approach: remove messages from DOM starting at msgIndex
+      const allMsgs = Array.from(chat.querySelectorAll('.message'));
+      let startRemoving = false;
+      allMsgs.forEach(el => {
+        if (el.dataset.msgIndex == msgIndex) startRemoving = true;
+        if (startRemoving) el.remove();
+      });
+      
+      // Truncate history to before this message
+      const historyIndex = msgIndex * 2; // Each exchange is 2 messages (user + assistant)
+      history.length = historyIndex;
+      
+      // Put content in input for editing
+      document.getElementById('userInput').value = content;
+      document.getElementById('userInput').focus();
+      
+      updateMsgCount();
     }
 
     async function callOpenAI(systemPrompt, history, model) {
@@ -238,15 +300,21 @@
       const sendToA = target === 'both' || target === 'a';
       const sendToB = target === 'both' || target === 'b';
 
+      // Get message index for edit tracking
+      const msgIndexA = historyA.filter(m => m.role === 'user').length;
+      const msgIndexB = historyB.filter(m => m.role === 'user').length;
+
       // Add user message
       if (sendToA) {
-        addMessage('chatA', 'user', message);
+        addMessage('chatA', 'user', message, msgIndexA);
         historyA.push({ role: 'user', content: message });
       }
       if (sendToB) {
-        addMessage('chatB', 'user', message);
+        addMessage('chatB', 'user', message, msgIndexB);
         historyB.push({ role: 'user', content: message });
       }
+      
+      updateMsgCount();
 
       // Loading indicators
       const loadingA = sendToA ? addMessage('chatA', 'loading', 'Thinking...') : null;
@@ -272,7 +340,9 @@
           historyA.push({ role: 'assistant', content: resultA.value.content });
           const cost = calculateCost(modelA, resultA.value.promptTokens, resultA.value.completionTokens);
           totalCostA += cost;
-          document.getElementById('tokensA').textContent = `${resultA.value.totalTokens} tok · ${formatCost(cost)} (${formatCost(totalCostA)} total)`;
+          totalInputA += resultA.value.promptTokens;
+          totalOutputA += resultA.value.completionTokens;
+          document.getElementById('tokensA').textContent = `↑${totalInputA} ↓${totalOutputA} · ${formatCost(totalCostA)}`;
         } else {
           addMessage('chatA', 'error', resultA.reason.message);
         }
@@ -287,7 +357,9 @@
           historyB.push({ role: 'assistant', content: resultB.value.content });
           const cost = calculateCost(modelB, resultB.value.promptTokens, resultB.value.completionTokens);
           totalCostB += cost;
-          document.getElementById('tokensB').textContent = `${resultB.value.totalTokens} tok · ${formatCost(cost)} (${formatCost(totalCostB)} total)`;
+          totalInputB += resultB.value.promptTokens;
+          totalOutputB += resultB.value.completionTokens;
+          document.getElementById('tokensB').textContent = `↑${totalInputB} ↓${totalOutputB} · ${formatCost(totalCostB)}`;
         } else {
           addMessage('chatB', 'error', resultB.reason.message);
         }
@@ -301,10 +373,13 @@
       document.getElementById('chatB').innerHTML = '';
       document.getElementById('tokensA').textContent = '';
       document.getElementById('tokensB').textContent = '';
+      document.getElementById('msgCountA').textContent = '';
+      document.getElementById('msgCountB').textContent = '';
       historyA.length = 0;
       historyB.length = 0;
-      totalCostA = 0;
-      totalCostB = 0;
+      totalCostA = 0; totalCostB = 0;
+      totalInputA = 0; totalOutputA = 0;
+      totalInputB = 0; totalOutputB = 0;
     }
 
     function retryLast() {
@@ -324,6 +399,7 @@
         const chatB = document.getElementById('chatB');
         chatB.lastChild?.remove(); chatB.lastChild?.remove();
       }
+      updateMsgCount();
       document.getElementById('userInput').value = lastUserMessage;
       sendMessage(lastTarget);
     }
